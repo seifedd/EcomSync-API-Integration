@@ -11,21 +11,35 @@ function NavbarComponent() {
   const handleShow = () => setShow(true);
 
   const checkout = async () => {
-    await fetch("http://localhost:4000/checkout", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ items: cart.items }),
-    })
-      .then((response) => {
-        return response.json();
-      })
-      .then((response) => {
-        if (response.url) {
-          window.location.assign(response.url); // Forwarding user to Stripe
-        }
+    // Transform cart items to the format expected by the new API
+    const checkoutItems = cart.items.map(item => ({
+      id: item.id,
+      name: item.name || `Product ${item.id}`,
+      price: item.price || 1999, // Price in cents
+      quantity: item.quantity,
+    }));
+
+    try {
+      const response = await fetch("http://localhost:4000/api/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ items: checkoutItems }),
       });
+      
+      const data = await response.json();
+      
+      if (data.success && data.sessionUrl) {
+        window.location.assign(data.sessionUrl); // Redirect to Stripe Checkout
+      } else {
+        console.error("Checkout failed:", data.error);
+        alert(data.error || "Checkout failed. Please try again.");
+      }
+    } catch (error) {
+      console.error("Network error:", error);
+      alert("Unable to connect to payment server. Please try again.");
+    }
   };
 
   const productsCount = cart.items.reduce(

@@ -1,0 +1,87 @@
+// Prisma Schema for EcomSync Payment Backend
+// This schema demonstrates senior-level database design for fintech applications
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ORDER MODEL
+// ============================================================================
+// Represents a customer's order with full payment lifecycle tracking.
+// Key fintech patterns:
+//   - idempotencyKey: Prevents duplicate charges on retry
+//   - stripeCheckoutId: Reconciles our DB with Stripe's records
+//   - status enum: Clear state machine for order lifecycle
+// ============================================================================
+
+model Order {
+  id                String      @id @default(uuid())
+  
+  // Order Status - Finite State Machine
+  status            OrderStatus @default(PENDING)
+  
+  // Financial Data (amounts in cents to avoid floating point issues)
+  amount            Int         // Total amount in cents
+  currency          String      @default("usd")
+  
+  // Cart Snapshot - Immutable record of what was purchased
+  items             Json        // Array of { productId, name, price, quantity }
+  
+  // Idempotency - CRITICAL for payment safety
+  // Client provides this key; same key = same order (no duplicate charges)
+  idempotencyKey    String      @unique
+  
+  // Stripe Integration - Links our order to Stripe's records
+  stripeCheckoutId  String?     @unique  // checkout.session.id
+  stripePaymentId   String?              // payment_intent.id (from webhook)
+  
+  // Customer Info (populated from Stripe webhook)
+  customerEmail     String?
+  
+  // Audit Trail
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  paidAt            DateTime?            // Set when status -> PAID
+
+  @@index([status])
+  @@index([stripeCheckoutId])
+  @@index([createdAt])
+}
+
+// Order Status State Machine:
+// PENDING -> PROCESSING -> PAID (success path)
+// PENDING -> FAILED (if checkout abandoned or payment fails)
+// PAID -> REFUNDED (if refund issued)
+enum OrderStatus {
+  PENDING     // Order created, awaiting payment
+  PROCESSING  // Payment in progress (checkout started)
+  PAID        // Payment confirmed via webhook
+  FAILED      // Payment failed or expired
+  REFUNDED    // Payment was refunded
+}
+
+// ============================================================================
+// WEBHOOK EVENT MODEL
+// ============================================================================
+// Implements "At-Least-Once" delivery protection.
+// Stripe guarantees delivery but may send the same webhook multiple times.
+// We store processed event IDs to ensure idempotent handling.
+// ============================================================================
+
+model WebhookEvent {
+  id            String   @id  // Stripe event ID (evt_xxx) - globally unique
+  type          String       // Event type (e.g., "checkout.session.completed")
+  processedAt   DateTime @default(now())
+  
+  // Optional: Store event payload for debugging/audit
+  payload       Json?
+
+  @@index([type])
+  @@index([processedAt])
+}

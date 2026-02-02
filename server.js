@@ -14,7 +14,7 @@ app.use(express.static("public"));
 app.use(express.json());
 
 app.post("checkout", async (req, res) => {
-  /*
+  /* 
     req.body.items
     [
         {
